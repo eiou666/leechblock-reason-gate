@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>访问理由</title>
+  <style>
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: #fff;
+      color: #000;
+      font: 14px sans-serif;
+    }
+    #app { width: 320px; margin: 80px auto 0; }
+    textarea {
+      display: block;
+      box-sizing: border-box;
+      width: 100%;
+      height: 90px;
+      padding: 6px;
+      border: 1px solid #777;
+      border-radius: 0;
+      background: #fff;
+      color: #000;
+      font: inherit;
+      resize: none;
+    }
+    button {
+      display: block;
+      margin-top: 6px;
+      padding: 3px 12px;
+      border: 1px solid #777;
+      border-radius: 0;
+      background: #eee;
+      color: #000;
+      font: inherit;
+      cursor: pointer;
+    }
+    #lbDelaySeconds { font-size: 11px; color: #555; }
+  </style>
+</head>
+<body>
+  <main id="app"></main>
+  <script>
+    (() => {
+      const app = document.getElementById("app");
+      const stateKey = "leechblock-reason-gate:" + location.search;
+      const armed = sessionStorage.getItem(stateKey) === "armed";
+
+      if (armed) {
+        sessionStorage.removeItem(stateKey);
+        app.innerHTML = '<span id="lbDelaySeconds">5</span>';
+        return;
+      }
+
+      app.innerHTML = `
+        <textarea id="reason" maxlength="500" autofocus required
+          aria-label="访问理由"></textarea>
+        <button id="submit" type="button">确定</button>`;
+
+      const reason = document.getElementById("reason");
+      const submit = document.getElementById("submit");
+
+      const begin = () => {
+        if (reason.value.replace(/\s/g, "").length < 5) {
+          reason.setCustomValidity("至少输入5个非空白字符");
+          reason.reportValidity();
+          reason.focus();
+          return;
+        }
+        reason.setCustomValidity("");
+        sessionStorage.setItem(stateKey, "armed");
+        location.reload();
+      };
+
+      reason.addEventListener("input", () => reason.setCustomValidity(""));
+      submit.addEventListener("click", begin);
+      reason.addEventListener("keydown", event => {
+        if (event.ctrlKey && event.key === "Enter") begin();
+      });
+    })();
+  </script>
+</body>
+</html>
