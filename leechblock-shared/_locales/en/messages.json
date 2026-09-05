@@ -1,0 +1,38 @@
+{
+   "addPageMenuItem": {
+      "message": "Add Page"
+   },
+   "addPageToBlockSetMenuItem": {
+      "message": "Add Page to Block Set"
+   },
+   "addSiteMenuItem": {
+      "message": "Add Site"
+   },
+   "addSiteToBlockSetMenuItem": {
+      "message": "Add Site to Block Set"
+   },
+   "extensionDescription": {
+      "description": "Description of the extension.",
+      "message": "LeechBlock is a simple productivity tool for blocking time-wasting sites."
+   },
+   "extensionName": {
+      "description": "Name of the extension.",
+      "message": "LeechBlock NG"
+   },
+   "localePath": {
+      "description": "Path to localized files.",
+      "message": "/"
+   },
+   "lockdownMenuItem": {
+      "message": "Lockdown"
+   },
+   "optionsMenuItem": {
+      "message": "Options"
+   },
+   "overrideMenuItem": {
+      "message": "Override"
+   },
+   "statisticsMenuItem": {
+      "message": "Statistics"
+   }
+}

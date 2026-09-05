@@ -9,6 +9,7 @@ $baseUrl = "http://127.0.0.1:$Port"
 $health = Invoke-WebRequest -Uri "$baseUrl/healthz" -UseBasicParsing -TimeoutSec 5
 $page = Invoke-WebRequest -Uri "$baseUrl/lb-custom/reason-gate.html?test" -UseBasicParsing -TimeoutSec 5
 $html = $page.Content
+$gateScript = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..\leechblock-shared\blocked.js')
 
 $checks = [ordered]@{
     health = $health.StatusCode -eq 200 -and $health.Content.Trim() -eq "ok"
@@ -16,8 +17,11 @@ $checks = [ordered]@{
     oneTextarea = ([regex]::Matches($html, "<textarea\b").Count -eq 1)
     oneButton = ([regex]::Matches($html, "<button\b").Count -eq 1)
     noPlaceholder = $html -notmatch "placeholder="
-    fiveCharacterRule = $html -match "length < 5"
-    countdownHook = $html -match 'id="lbDelaySeconds"'
+    fiveCharacterRule = $gateScript -match "length < 5"
+    inlineGate = $html -match 'data-lb-reason-gate="inline-v1"'
+    initiallyDisabled = $html -match '<button[^>]+id="submit"[^>]+disabled'
+    noCountdownElement = $html -notmatch 'lbDelaySeconds'
+    noReloadTransition = $html -notmatch 'location.reload|sessionStorage'
 }
 
 $checks.GetEnumerator() | ForEach-Object {

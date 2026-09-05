@@ -1,0 +1,76 @@
+{
+   "action": {
+      "browser_style": false,
+      "default_icon": {
+         "16": "icons/leechblock16.png",
+         "32": "icons/leechblock32.png",
+         "48": "icons/leechblock48.png",
+         "64": "icons/leechblock64.png"
+      },
+      "default_popup": "popup.html",
+      "default_title": "LeechBlock"
+   },
+   "author": "James Anderson",
+   "background": {
+      "service_worker": "background.js"
+   },
+   "commands": {
+      "lb-add-sites": {
+         "description": "Add sites to block set"
+      },
+      "lb-cancel-override": {
+         "description": "Cancel override"
+      },
+      "lb-discard-time": {
+         "description": "Discard remaining time"
+      },
+      "lb-lockdown": {
+         "description": "Activate lockdown"
+      },
+      "lb-options": {
+         "description": "Open the options page"
+      },
+      "lb-override": {
+         "description": "Activate override"
+      },
+      "lb-reset-rollover": {
+         "description": "Reset rollover time"
+      },
+      "lb-statistics": {
+         "description": "Open the statistics page"
+      }
+   },
+   "content_scripts": [ {
+      "css": [ "content.css" ],
+      "exclude_matches": [ "*://*/*lb-custom*" ],
+      "js": [ "content.js" ],
+      "matches": [ "\u003Call_urls>" ],
+      "run_at": "document_start"
+   }, {
+      "js": [ "blocked.js" ],
+      "matches": [ "*://*/*lb-custom*" ]
+   } ],
+   "default_locale": "en",
+   "description": "LeechBlock NG 本地修改版：同一 Block Set 的理由门放行在所有标签页共享。",
+   "homepage_url": "https://www.proginosko.com/leechblock/",
+   "host_permissions": [ "\u003Call_urls>" ],
+   "icons": {
+      "128": "icons/leechblock128.png",
+      "16": "icons/leechblock16.png",
+      "32": "icons/leechblock32.png",
+      "48": "icons/leechblock48.png",
+      "64": "icons/leechblock64.png",
+      "96": "icons/leechblock96.png"
+   },
+   "incognito": "split",
+   "manifest_version": 3,
+   "name": "LeechBlock NG — 全局理由门（本地版）",
+   "optional_permissions": [ "history" ],
+   "options_ui": {
+      "open_in_tab": true,
+      "page": "options.html"
+   },
+   "permissions": [ "alarms", "contextMenus", "offscreen", "storage", "tabs", "unlimitedStorage", "webNavigation" ],
+   "version": "1.7.3.2",
+   "version_name": "1.7.3 + shared reason gate 2 (inline wait)"
+}

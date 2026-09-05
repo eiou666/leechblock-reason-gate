@@ -1,0 +1,39 @@
+name: Reason Gate tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check default configuration and release files
+        shell: pwsh
+        run: |
+          node scripts/defaults.cjs --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/package.cjs
+      - name: Test global grants and inline gate
+        run: node --test --test-isolation=none scripts/test-shared-session.cjs
+      - name: Start loopback service
+        shell: pwsh
+        run: ./scripts/start.ps1
+      - name: Check served gate
+        shell: pwsh
+        run: ./scripts/test.ps1
+      - name: Stop loopback service
+        if: always()
+        shell: pwsh
+        run: ./scripts/stop.ps1

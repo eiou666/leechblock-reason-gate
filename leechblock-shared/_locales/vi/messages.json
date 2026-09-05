@@ -1,0 +1,38 @@
+{
+   "addPageMenuItem": {
+      "message": "Thêm trang"
+   },
+   "addPageToBlockSetMenuItem": {
+      "message": "Thêm trang vào Bộ chặn"
+   },
+   "addSiteMenuItem": {
+      "message": "Thêm địa chỉ web"
+   },
+   "addSiteToBlockSetMenuItem": {
+      "message": "Thêm địa chỉ web vào Bộ chặn"
+   },
+   "extensionDescription": {
+      "description": "Mô tả của tiện ích mở rộng.",
+      "message": "LeechBlock là một công cụ năng suất đơn giản để chặn các trang web tốn thời gian."
+   },
+   "extensionName": {
+      "description": "Tên của tiện ích mở rộng.",
+      "message": "LeechBlock NG"
+   },
+   "localePath": {
+      "description": "Đường dẫn đến các tệp đã được bản địa hóa.",
+      "message": "/vi/"
+   },
+   "lockdownMenuItem": {
+      "message": "Khóa trang"
+   },
+   "optionsMenuItem": {
+      "message": "Tùy chọn"
+   },
+   "overrideMenuItem": {
+      "message": "Ghi đè"
+   },
+   "statisticsMenuItem": {
+      "message": "Thống kê"
+   }
+}

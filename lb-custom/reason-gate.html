@@ -6,7 +6,7 @@
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>访问理由</title>
+  <title>网站</title>
   <style>
     html, body {
       margin: 0;
@@ -40,49 +40,19 @@
       font: inherit;
       cursor: pointer;
     }
-    #lbDelaySeconds { font-size: 11px; color: #555; }
+    button:disabled {
+      color: #000;
+      background: #eee;
+      opacity: 1;
+      cursor: default;
+    }
   </style>
 </head>
 <body>
-  <main id="app"></main>
-  <script>
-    (() => {
-      const app = document.getElementById("app");
-      const stateKey = "leechblock-reason-gate:" + location.search;
-      const armed = sessionStorage.getItem(stateKey) === "armed";
-
-      if (armed) {
-        sessionStorage.removeItem(stateKey);
-        app.innerHTML = '<span id="lbDelaySeconds">5</span>';
-        return;
-      }
-
-      app.innerHTML = `
-        <textarea id="reason" maxlength="500" autofocus required
-          aria-label="访问理由"></textarea>
-        <button id="submit" type="button">确定</button>`;
-
-      const reason = document.getElementById("reason");
-      const submit = document.getElementById("submit");
-
-      const begin = () => {
-        if (reason.value.replace(/\s/g, "").length < 5) {
-          reason.setCustomValidity("至少输入5个非空白字符");
-          reason.reportValidity();
-          reason.focus();
-          return;
-        }
-        reason.setCustomValidity("");
-        sessionStorage.setItem(stateKey, "armed");
-        location.reload();
-      };
-
-      reason.addEventListener("input", () => reason.setCustomValidity(""));
-      submit.addEventListener("click", begin);
-      reason.addEventListener("keydown", event => {
-        if (event.ctrlKey && event.key === "Enter") begin();
-      });
-    })();
-  </script>
+  <main id="app" data-lb-reason-gate="inline-v1">
+    <textarea id="reason" maxlength="500" autofocus required
+      aria-label="访问理由"></textarea>
+    <button id="submit" type="button" disabled>确定</button>
+  </main>
 </body>
 </html>

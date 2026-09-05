@@ -1,5 +1,14 @@
 .runtime/
+.publish/
 __pycache__/
+*.py[cod]
 *.log
 .DS_Store
 Thumbs.db
+node_modules/
+.env
+.env.*
+# Local superseded experiments are not part of the current product.
+TAB-INHERITANCE.md
+scripts/leechblock-inherit-tabs.user.js
+scripts/test-tab-inheritance.cjs

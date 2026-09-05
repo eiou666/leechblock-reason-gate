@@ -1,0 +1,38 @@
+{
+   "addPageMenuItem": {
+      "message": "Adicionar Página"
+   },
+   "addPageToBlockSetMenuItem": {
+      "message": "Adicionar Página para Lista de Bloqueio"
+   },
+   "addSiteMenuItem": {
+      "message": "Adicionar Site"
+   },
+   "addSiteToBlockSetMenuItem": {
+      "message": "Adicionar Site para Lista de Bloqueio"
+   },
+   "extensionDescription": {
+      "description": "Descrição da extensão.",
+      "message": "LeechBlock é uma ferramenta de produtividade simples para bloquear sites que desperdiçam tempo."
+   },
+   "extensionName": {
+      "description": "Nome da extensão.",
+      "message": "LeechBlock NG"
+   },
+   "localePath": {
+      "description": "Endereço dos arquivos localizados.",
+      "message": "/pt_BR/"
+   },
+   "lockdownMenuItem": {
+      "message": "Lockdown"
+   },
+   "optionsMenuItem": {
+      "message": "Opções"
+   },
+   "overrideMenuItem": {
+      "message": "Suspender"
+   },
+   "statisticsMenuItem": {
+      "message": "Estatísticas"
+   }
+}

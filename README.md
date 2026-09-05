@@ -1,243 +1,156 @@
-# LeechBlock Reason Gate
+# LeechBlock Reason Gate · 全局理由门
 
-一个供 LeechBlock NG 使用的极简本机理由页。访问受限网站时，页面只显示一个空白输入框和一个“确定”按钮；输入至少 5 个非空白字符后，LeechBlock 才开始倒计时并临时放行目标网站。
+当前版本 **1.7.3.2**：**单页隐式等待 + 同一 Block Set 全局共享放行**。
 
-默认配置示例：每天 `07:00–22:00` 启用理由门，每次通过后放行当前访问会话 30 分钟，倒计时 5 秒。
+本项目已替换原仓库的旧实现。它不再是配合商店原版使用的独立理由页：必须加载仓库中附带的 **LeechBlock NG 本地修改版**。旧版“输入后跳到倒计时页、放行绑定单标签”的代码可从 Git 历史找回，但不适用于这里的安装说明。
 
-## 工作方式
+## 默认启用的配置
 
-1. LeechBlock 把目标页重定向到本机理由页。
-2. 理由页只在浏览器内检查输入长度；理由不会上传或保存。
-3. 输入合格后页面重新加载，并创建 LeechBlock 识别的 `lbDelaySeconds` 元素。
-4. LeechBlock 自己完成 5 秒倒计时、30 分钟临时放行和原页面跳转。
+首次加载本地扩展时自动写入并启用以下两组，无需手填。按电脑本地时间运行，周一至周日每天启用，时间段起点包含、终点不包含。
 
-30 分钟的放行状态由 LeechBlock 绑定到当前标签页。关闭标签页后新开网站，通常需要重新填写理由；同一标签页内访问同一 Block Set 的页面则继续使用剩余放行时间。
+| 组 | 生效时段 | 单次全局放行 |
+| --- | --- | --- |
+| 1：指定时段 | 07:00–11:50、12:00–17:50、18:00–22:00 | 30 分钟 |
+| 2：其他时段 | 00:00–07:00、11:50–12:00、17:50–18:00、22:00–24:00 | 5 分钟 |
 
-## 项目结构
+两组包含同一份网站列表：抖音、B站、YouTube、X/Twitter、知乎及其子域名、短链接域名。
 
 ```text
-leechblock-reason-gate/
-├─ lb-custom/
-│  └─ reason-gate.html   # 唯一正式页面
-├─ scripts/
-│  ├─ server.py          # 仅监听 127.0.0.1 的无缓存 HTTP 服务
-│  ├─ start.ps1          # 启动服务
-│  ├─ stop.ps1           # 安全停止由本项目启动的服务
-│  ├─ install.ps1        # 启动服务并安装当前用户自启动项
-│  ├─ uninstall.ps1      # 删除自启动项并停止服务
-│  └─ test.ps1           # 无第三方依赖的功能检查
-├─ .gitignore
-├─ LICENSE
-└─ README.md
+douyin.com        *.douyin.com
+bilibili.com      *.bilibili.com
+b23.tv            *.b23.tv
+youtube.com       *.youtube.com
+youtu.be          *.youtu.be
+x.com             *.x.com
+twitter.com       *.twitter.com
+t.co              *.t.co
+zhihu.com         *.zhihu.com
 ```
 
-旧地址 `/lb-custom/reason-gate-v2.html` 由本机服务器自动重定向到正式页面，因此旧的 LeechBlock 配置仍可继续工作。
+两组均启用到期拦截，Time limit 留空，使用时间段 OR 时间限额的判断方式。30/5 分钟设置在“通过门禁后的放行时长”，不是每日累计使用限额。
 
-## 在一台新 Windows 电脑上安装
+配置来源是 [reasonGateDefaults()](leechblock-shared/shared-session.js)，可导入的完整静态备份是 [config/default-options.txt](config/default-options.txt)。已安装用户的自定义设置不会被更新自动覆盖；若要恢复默认，请在本地版 Options → Import Options 选择该 TXT，再 Save Options。恢复前可以先导出已有配置。
 
-### 1. 安装基础软件
+## 门禁行为
 
-需要：
+1. 打开受限网站，跳到本机理由页。输入框和“确定”按钮从一开始就同时显示。
+2. 进入页面后等待 **5 秒**，不显示数字倒计时；这期间点击按钮无反应，Ctrl+Enter 也不能提前提交。
+3. 5 秒后按钮可点击。填写至少 **5 个非空白字符**，点击“确定”或按 Ctrl+Enter，直接进入原网址。没有单独的倒计时界面，也不会因为等够时间自动放行。
+4. 同一组内所有网站、子域名、标签页和窗口，共享同一个放行截止时间。新标签、地址栏、书签、站内导航都不会重新门禁或补满时长。
+5. 到期后再次门禁。切换到另一组时段时旧放行结束，例如 11:40 放行只持续到 11:50；午夜不换组，23:59 的 5 分钟可以持续到 00:04。
 
-- Windows 10 或 Windows 11
-- Chrome、Edge 或其他 Chromium 浏览器
-- [LeechBlock NG](https://www.proginosko.com/leechblock/installation/)，建议 1.7 或更高版本
-- Python 3.10 或更高版本
-- Git 与 GitHub CLI（用于克隆私有仓库）
+普通窗口和无痕窗口分开计时；后台工作线程休眠保留放行，浏览器重启或扩展重新加载则清除放行。刷新理由页会重新等待 5 秒。页面到期拦截沿用原扩展约每秒一次的检查，实际时机可能受浏览器调度影响。
 
-安装 Python 时勾选 **Add Python to PATH**。安装后在 PowerShell 检查：
+## 安装（Windows + Chrome）
 
-```powershell
-python --version
-```
+### 1. 下载完整仓库
 
-如果使用 `winget`，可以先搜索当前可用版本：
+需要 Windows 10/11、Chrome，以及加入 PATH 的 **Python 3.10+**。运行本项目无需 Node.js；只有执行开发测试/检查默认配置时才需要 Node.js 24。
 
-```powershell
-winget search --id Python.Python
-```
-
-然后安装任意 Python 3.10+ 版本。
-
-### 2. 克隆仓库
-
-仓库默认为私有，因此先登录拥有访问权的 GitHub 账户：
+登录 GitHub 后可用 Code → Download ZIP，解压到一个固定位置。也可以：
 
 ```powershell
 gh auth login
 gh repo clone eiou666/leechblock-reason-gate
 cd leechblock-reason-gate
+python --version
 ```
 
-### 3. 安装本机服务与自动启动
+请勿只下载 HTML。扩展的脚本、图标、字体、配置界面等文件均已包含在仓库中。
 
-在仓库根目录执行：
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
-```
-
-该脚本会：
-
-- 在 `127.0.0.1:8765` 启动理由页服务；
-- 在当前 Windows 用户的启动文件夹创建启动项；
-- 不需要管理员权限；
-- 不监听局域网或公网地址。
-
-验证安装：
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1
-```
-
-看到全部 `PASS` 即表示本机服务和页面可用。
-
-### 4. 配置 LeechBlock NG
-
-打开 LeechBlock NG 的 **Options**，选择一个 Block Set，并点击 **Show Full Options**。
-
-#### What to Block
-
-- `Custom name`：按需填写，例如 `需要说明理由的网站`
-- `Sites to block`：填写目标域名，每行一个。例如：
-
-  ```text
-  douyin.com
-  *.douyin.com
-  reddit.com
-  *.reddit.com
-  ```
-
-#### When to Block
-
-- `Time periods`：`0700-2200`
-- `Time limit`：留空
-- `Roll over unused time`：不勾选
-- `Select when to block`：`within time periods OR after time limit`
-- `Days`：`Sun` 到 `Sat` 全部勾选
-
-这里不要把 30 填入 `Time limit`。30 分钟属于通过理由页后的单次放行时间。
-
-#### How to Block
-
-在 `Enter the fully specified URL...` 中粘贴：
-
-```text
-http://127.0.0.1:8765/lb-custom/reason-gate.html?$S&$U
-```
-
-粘贴后不要再点击 `Default Page`、`Delaying Page` 或 `Password Page`，否则 URL 会被覆盖。
-
-继续设置：
-
-- 勾选 `Immediately block pages on these sites once blocking conditions are met`
-- 勾选 `Block only first accessed page of`
-- 右侧选择 `block set`
-- `Allow access to sites for only`：`30` minutes
-- `Delay access to sites by`：`5` seconds
-- 勾选 `Automatically load blocked page when delay countdown reaches zero`
-- `Close tab instead of blocking page`：不勾选
-
-最后点击 **Save Options**。
-
-同一个理由页 URL 可以重复用于多个 Block Set；每个 Block Set 可以设置不同的网站、时间和放行时长。
-
-### 5. 实际测试
-
-在设定时段内打开任一受限网站。正确流程应为：
-
-```text
-空白输入框 → 输入不足 5 个非空白字符时被阻止
-           → 输入合格并点击“确定”
-           → 小型 5 秒倒计时
-           → 自动打开原网站
-           → 当前访问会话放行 30 分钟
-```
-
-## 日常命令
+### 2. 启动本机服务并安装开机自启
 
 在仓库根目录运行：
 
 ```powershell
-# 启动
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start.ps1
-
-# 验证
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1
-
-# 停止
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\stop.ps1
-
-# 删除自启动项并停止服务；不会删除仓库
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\uninstall.ps1
-```
-
-## 更换端口
-
-如果 `8765` 被占用，可以重新安装到其他端口：
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Port 8876
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Port 8876
-```
-
-同时把 LeechBlock URL 中的端口改为相同值：
-
-```text
-http://127.0.0.1:8876/lb-custom/reason-gate.html?$S&$U
-```
-
-## 更新
-
-```powershell
-git pull
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1
 ```
 
-HTML 更新会立即生效；服务器会发送禁止缓存响应头。只有 `server.py` 或启动脚本更新时才需要停止并重新启动服务。
+服务只监听 `127.0.0.1:8765`。脚本会安装当前 Windows 用户的登录启动项，不需要管理员权限。测试显示全部 PASS 说明服务和页面可用，不代表扩展已安装。
 
-## 故障排查
+本地修改版固定识别端口 **8765**。不要仅使用启动脚本的 `-Port` 参数换端口；那样需要同步修改扩展的地址校验和默认配置。目前建议保持默认端口。
 
-### 页面显示“无法访问此网站”
+### 3. 加载附带的本地扩展
 
-运行：
+1. 如果安装过商店原版 LeechBlock NG，请先关闭它；不用卸载，旧设置可保留用于回退。
+2. 如果使用过旧油猴标签继承脚本，也请关闭。新版不需要油猴。
+3. 打开 `chrome://extensions`，启用右上角“开发者模式”。
+4. 点击“加载已解压的扩展程序”，选择仓库内的 **`leechblock-shared` 文件夹**，不是仓库根目录。
+5. 确认 **LeechBlock NG — 全局理由门（本地版）** 已启用，并允许它在目标网站上运行。需要无痕支持时，另外打开“允许在无痕模式下运行”。
+6. 打开本地版 Options，确认两组规则已出现且未禁用。刷新已打开的网页。
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1
-```
+第一次安装自动启用上表规则，通常无需导入配置。原版和本地版不能同时启用，否则原版仍可能重复拦截。
 
-### 仍显示旧页面
-
-确认插件中使用的是正式 URL，并再次点击 **Save Options**：
+拦截页 URL 已预设为：
 
 ```text
 http://127.0.0.1:8765/lb-custom/reason-gate.html?$S&$U
 ```
 
-本项目服务器主动返回 `Cache-Control: no-store`，正常情况下无需清理浏览器缓存。
+不要改为 Default Page / Delaying Page / Password Page。保留仓库所在文件夹，浏览器和开机启动项都依赖它。
 
-### 没有倒计时或无法跳回原网站
+### 4. 验收
 
-检查：
+填写理由，确认前 5 秒点击无反应、5 秒后直接放行。之后在同一个剩余时间内测试：B站搜索 → 首页，首页 → 收藏/空间，新标签直接输入 YouTube。均不应再进入理由页，也不应重新计算完整的 30/5 分钟。
 
-- LeechBlock NG 版本是否为 1.7+；
-- 插件是否具有“在所有网站上读取和更改数据”的权限；
-- URL 是否包含 `lb-custom` 且严格以 `?$S&$U` 结尾；
-- `Delay access...` 是否为 `5`；
-- `Automatically load blocked page...` 是否已勾选。
+## 更新与旧版迁移
 
-### 每次打开站内新页面都重新要求理由
+如果正在使用原仓库的旧版独立理由页，请按上述安装步骤加载附带扩展，并关闭商店原版和旧油猴脚本；仅更新 HTML 不够。
 
-确认已勾选 `Block only first accessed page of`，并选择 `block set`。
+如果已使用本地修改版：
 
-## 隐私与安全
+```powershell
+git pull
+```
 
-- 服务只绑定 `127.0.0.1`，其他设备不能通过局域网访问。
-- 理由只用于当前页面的长度校验，不保存到文件、浏览器存储或服务器。
-- 服务仅提供正式理由页、旧地址重定向和健康检查；其他路径返回 404。
-- 此工具是自我管理辅助工具，不是家长控制、网络防火墙或防绕过安全系统。
+然后在 `chrome://extensions` 对本地版点击“重新加载”，再刷新门禁页。设置不会被重置，但临时放行会清除。若 `server.py` 或启动脚本发生变化，再停止/重新启动服务；仅 HTML 修改无需重启服务。
+
+更换仓库目录时，需要从新目录重新安装启动项，并重新加载新目录的扩展。若同端口仍在运行旧目录服务，应先在旧目录执行 stop.ps1。
+
+## 日常命令与测试
+
+```powershell
+# 启动 / 停止（均在仓库根目录执行）
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\stop.ps1
+
+# 检查正在运行的服务和单页界面
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1
+
+# 开发检查：需要 Node.js 24，无需安装 npm 依赖
+node --test --test-isolation=none .\scripts\test-shared-session.cjs
+node .\scripts\defaults.cjs --check
+node .\scripts\package.cjs
+
+# 删除当前用户自启动项并停止服务，保留所有项目文件
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\uninstall.ps1
+```
+
+自动测试执行实际的后台和内容脚本，Chrome API 使用测试替身，不能代替加载扩展后的浏览器验收。
+
+## 常见问题
+
+- **按钮始终不可点击**：确认加载的是本仓库本地版、版本为 1.7.3.2，重新加载扩展并刷新理由页；商店原版不能驱动新版按钮。
+- **仍然反复门禁**：确认原版 LeechBlock 已关闭，只保留本地版；核对是否刚好到期、切换时段、重启浏览器或进入无痕窗口。
+- **无法打开理由页**：运行 start.ps1 和 test.ps1，检查 Python 是否在 PATH、8765 端口是否被其他程序占用。
+- **第一次打开没有默认规则**：等待后台完成初始化，重新打开 Options；若该扩展已有旧设置，请手动导入 default-options.txt 并保存。
+- **暂停使用**：先禁用本地扩展，再停止服务。若只关闭服务但保持扩展启用，受限网站会跳到不可访问的本机页面。
+- **回退**：关闭本地版后可以恢复商店原版；这会恢复旧的行为。仓库旧实现保留在 Git 历史中，本次替换没有删除提交历史。
+
+## 文件结构与隐私
+
+- `leechblock-shared/`：完整本地扩展、默认配置实现和第三方依赖。
+- `lb-custom/reason-gate.html`：极简单页理由输入界面。
+- `scripts/`：本机服务、Windows 管理脚本、回归测试和默认配置检查。
+- `config/default-options.txt`：不含运行状态/密码的默认配置备份。
+- [GLOBAL-GATE.md](GLOBAL-GATE.md)：共享放行细节与验证路径。
+- [leechblock-shared/LOCAL-FORK.md](leechblock-shared/LOCAL-FORK.md)：本地修改说明。
+
+理由只在页面内校验，不保存或上传。共享放行记录只含配置签名和时间戳。服务仅提供理由页、旧地址重定向和健康检查，不开放其他工作区文件；`.runtime`、凭据和浏览器个人配置不纳入仓库。
+
+这是自我管理工具，不是防绕过安全系统。它是基于 LeechBlock NG 1.7.3 的非官方本地修改版，不会自动接收商店更新，需要后续手动维护。
 
 ## 许可证
 
-[MIT](LICENSE)
+根目录 [MIT LICENSE](LICENSE) 适用于本项目自己的页面、服务及管理脚本。`leechblock-shared/` 中的 LeechBlock 源码和修改部分遵循 [MPL-2.0](leechblock-shared/LICENSE)，其中捆绑的 jQuery UI、字体等保留各自许可证与作者信息，详见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
