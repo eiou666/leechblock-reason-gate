@@ -36,6 +36,7 @@ var gAllFocused = false;
 var gUseDocFocus = true;
 var gOverrideIcon = false;
 var gSaveSecsCount = 0;
+var gTickerCreating;
 
 const gReasonSessions = new ReasonGateSessions(browser.storage.session);
 // Do not allow option-dependent checks before session restoration completes.
@@ -185,11 +186,14 @@ function refreshMenus() {
 
 // Refresh ticker for updates
 //
-function refreshTicker() {
-	let processTabsSecs = +gOptions["processTabsSecs"];
-	
-	// Send message to ticker (offscreen document)
-	browser.runtime.sendMessage({ type: "ticker", tickerSecs: processTabsSecs });
+async function refreshTicker() {
+	try {
+		// Storage can finish loading before the offscreen page has a receiver.
+		await createTicker();
+		await browser.runtime.sendMessage({ type: "ticker", tickerSecs: +gOptions["processTabsSecs"] });
+	} catch (error) {
+		warn("Cannot refresh ticker: " + error);
+	}
 }
 
 // Retrieve options from storage
@@ -210,9 +214,15 @@ function retrieveOptions(update) {
 
 	async function onGot(options) {
 		// This fork has a separate extension ID/storage. Seed only a fresh install.
-		if (options.numSets === undefined && !Object.keys(options).some(key => /^sites\d+$/.test(key))) {
+		const freshInstall = options.numSets === undefined && !Object.keys(options).some(key => /^sites\d+$/.test(key));
+		if (freshInstall) {
 			options = { ...options, ...reasonGateDefaults() };
-			await gStorage.set(options);
+		}
+		const migration = reasonGateCountdownMigration(options);
+		if (freshInstall || Object.keys(migration).length) {
+			// Persist the switches and marker together before publishing options.
+			await gStorage.set(freshInstall ? { ...options, ...migration } : migration);
+			Object.assign(options, migration);
 		}
 		// Copy retrieved options (exclude timedata if update)
 		for (let option in options) {
@@ -2061,12 +2071,26 @@ function onAlarm(alarmInfo) {
 	//log("onAlarm: " + alarmInfo.name);
 }
 
-async function createTicker() {
-	await browser.offscreen.createDocument({
-		url: browser.runtime.getURL("ticker.html"),
-		reasons: [ browser.offscreen.Reason.WORKERS ],
-		justification: "Ticker needs to run in offscreen document"
-	});
+function createTicker() {
+	// A sleeping worker may restart while its offscreen document still exists.
+	// Share the lookup/creation promise across startup and option refreshes.
+	if (!gTickerCreating) {
+		gTickerCreating = (async () => {
+			const url = browser.runtime.getURL("ticker.html");
+			const exists = browser.runtime.getContexts
+				? (await browser.runtime.getContexts({
+					contextTypes: ["OFFSCREEN_DOCUMENT"], documentUrls: [url]
+				})).length > 0
+				: (await self.clients.matchAll()).some(client => client.url == url);
+			if (exists) return;
+			await browser.offscreen.createDocument({
+				url,
+				reasons: [ browser.offscreen.Reason.WORKERS ],
+				justification: "Ticker needs to run in offscreen document"
+			});
+		})().finally(() => { gTickerCreating = null; });
+	}
+	return gTickerCreating;
 }
 
 /*** STARTUP CODE BEGINS HERE ***/
@@ -2103,7 +2127,7 @@ if (browser.windows) {
 	//browser.windows.onFocusChanged.addListener(handleWinFocused);
 }
 
-createTicker();
+createTicker().catch(error => warn("Cannot create ticker: " + error));
 
 // Use alarms to keep background script alive and ticker ticking...
 let now = Date.now();

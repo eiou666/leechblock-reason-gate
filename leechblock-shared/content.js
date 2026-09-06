@@ -15,15 +15,46 @@ const TIMER_LOCATIONS = [
 
 var gTimer;
 var gAlert;
+var gContentActive = true;
+
+// Reloading an extension leaves its old content scripts in already-open pages.
+// Stop those listeners once their runtime disappears instead of throwing on focus.
+function stopContentScript() {
+	if (!gContentActive) return;
+	gContentActive = false;
+	window.removeEventListener("focus", onFocus);
+	window.removeEventListener("blur", onBlur);
+	window.removeEventListener("pagehide", onPageHide);
+	try { browser.runtime.onMessage.removeListener(handleMessage); } catch (_) {}
+	onPageHide();
+}
+
+async function sendBackgroundNotification(message) {
+	if (!gContentActive) return;
+	try {
+		if (!browser.runtime.id) {
+			stopContentScript();
+			return;
+		}
+		await browser.runtime.sendMessage(message);
+	} catch (error) {
+		const text = String(error?.message || error);
+		if (/Extension context invalidated/i.test(text)) {
+			stopContentScript();
+		} else if (!/Receiving end does not exist|The message port closed before a response was received/i.test(text)) {
+			console.warn("[LBNG] Cannot notify background: " + text);
+		}
+	}
+}
 
 // Notify background script that page has loaded
 //
 function notifyLoaded() {
 	// Register that this script has now loaded
-	browser.runtime.sendMessage({ type: "loaded", url: document.URL });
+	sendBackgroundNotification({ type: "loaded", url: document.URL });
 
 	// Send URL of referring page to background script
-	browser.runtime.sendMessage({ type: "referrer", referrer: document.referrer });
+	sendBackgroundNotification({ type: "referrer", referrer: document.referrer });
 }
 
 // Update timer
@@ -186,11 +217,11 @@ function handleMessage(message, sender, sendResponse) {
 }
 
 function onFocus(event) {
-	browser.runtime.sendMessage({ type: "focus", focus: true });
+	sendBackgroundNotification({ type: "focus", focus: true });
 }
 
 function onBlur(event) {
-	browser.runtime.sendMessage({ type: "focus", focus: false });
+	sendBackgroundNotification({ type: "focus", focus: false });
 }
 
 function onPageHide(event) {
@@ -207,8 +238,8 @@ function onPageHide(event) {
 
 browser.runtime.onMessage.addListener(handleMessage);
 
-notifyLoaded();
-
 window.addEventListener("focus", onFocus);
 window.addEventListener("blur", onBlur);
 window.addEventListener("pagehide", onPageHide);
+
+notifyLoaded();

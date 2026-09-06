@@ -30,7 +30,8 @@ async function setup({ now = timestamp(), session = memoryStorage(), local = mem
   }
   const updates = [], tabs = [];
   const chrome = {
-    runtime: { getURL: name => `chrome-extension://test/${name}`, async sendMessage() {} },
+    runtime: { getURL: name => `chrome-extension://test/${name}`, async sendMessage() {}, async getContexts() { return []; } },
+    offscreen: { Reason: { WORKERS: 'WORKERS' }, async createDocument() {} },
     extension: { inIncognitoContext: privateContext },
     storage: { session, local, sync: memoryStorage(), onChanged: { addListener() {} } },
     tabs: {
@@ -73,7 +74,7 @@ async function setup({ now = timestamp(), session = memoryStorage(), local = mem
 }
 
 // DOM/event/timer harness for the served single-page UI plus real content script.
-async function inlinePage(h, { elapsed = 0, infoOverride, failSend = false } = {}) {
+async function inlinePage(h, { elapsed = 0, infoOverride, failSend = false, initialError, syncSendError = false } = {}) {
   class Element {
     constructor(attributes = {}) { this.attributes = attributes; this.events = {}; this.value = ''; this.disabled = false; this.validity = ''; this.reports = 0; }
     getAttribute(key) { return this.attributes[key] ?? null; }
@@ -97,12 +98,23 @@ async function inlinePage(h, { elapsed = 0, infoOverride, failSend = false } = {
     location: new URL(source),
     performance: { now: () => clock },
     window: { setTimeout(fn, ms) { timers.push({ fn, at: clock + ms }); return timers.length; } },
-    chrome: { runtime: { async sendMessage(message) {
-      if (message.type === 'blocked') return infoOverride ?? h.context.createBlockInfo(id, source);
+    chrome: { runtime: { sendMessage(message) {
+      if (message.type === 'blocked') {
+        if (initialError) {
+          if (syncSendError) throw initialError;
+          return Promise.reject(initialError);
+        }
+        return Promise.resolve(infoOverride ?? h.context.createBlockInfo(id, source));
+      }
       messages.push(message);
-      if (rejectNextSend) { rejectNextSend = false; throw new Error('test disconnected extension'); }
+      if (rejectNextSend) {
+        rejectNextSend = false;
+        const error = new Error(failSend === 'invalidated' ? 'Extension context invalidated.' : 'Could not establish connection. Receiving end does not exist.');
+        if (syncSendError) throw error;
+        return Promise.reject(error);
+      }
       // Exercise the actual background grant logic, not just message shape.
-      await h.context.allowBlockedPage(id, message.blockedURL, message.blockedSet, true, source);
+      return h.context.allowBlockedPage(id, message.blockedURL, message.blockedSet, true, source);
     } } },
   });
   vm.runInContext(fs.readFileSync(path.join(dir, 'blocked.js'), 'utf8'), context);
@@ -470,8 +482,302 @@ test('local fork manifest has its own identity, no store update, and unchanged p
   const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));
   assert.equal(manifest.key, undefined);
   assert.equal(manifest.update_url, undefined);
-  assert.equal(manifest.version, '1.7.3.2');
-  for (const script of ['background.js', 'common.js', 'shared-session.js', 'blocked.js']) {
+  assert.equal(manifest.version, '1.7.3.5');
+  for (const script of ['background.js', 'common.js', 'shared-session.js', 'blocked.js', 'content.js', 'ticker.js']) {
     assert.doesNotThrow(() => new vm.Script(fs.readFileSync(path.join(dir, script), 'utf8'), { filename: script }));
   }
+});
+
+test('countdown display migration updates both saved gate sets in local or sync storage only once', async () => {
+  for (const area of ['local', 'sync']) {
+    const base = await setup();
+    const saved = { ...structuredClone(base.context.gOptions), showTimer1: true, showTimer2: true,
+      timerVisible: true, timerBadge: true, setName1: 'Custom name', delayAllowMins1: '17',
+      numSets: '3', sites3: 'example.com', showTimer3: true, sync: area === 'sync' };
+    const storage = memoryStorage(saved);
+    const h = await setup({ initialize: false, local: area === 'local' ? storage : memoryStorage({ sync: true }) });
+    if (area === 'sync') h.context.chrome.storage.sync = storage;
+    await h.context.retrieveOptions();
+    assert.equal(h.context.gGotOptions, true);
+    assert.deepEqual(storage.data, { ...saved, showTimer1: false, showTimer2: false, reasonGateCountdownMigration: 1 });
+    assert.equal(h.context.gOptions.showTimer1, false);
+    assert.equal(h.context.gOptions.showTimer2, false);
+    // A later explicit choice must survive both option refresh and worker restart.
+    await storage.set({ showTimer1: true });
+    await h.context.retrieveOptions(true);
+    assert.equal(h.context.gOptions.showTimer1, true);
+    const restarted = await setup({ initialize: false, local: area === 'local' ? storage : memoryStorage({ sync: true }) });
+    if (area === 'sync') restarted.context.chrome.storage.sync = storage;
+    await restarted.context.retrieveOptions();
+    assert.equal(restarted.context.gOptions.showTimer1, true);
+    assert.equal(restarted.context.gOptions.showTimer2, false);
+  }
+});
+
+test('countdown display migration does not change a set that no longer uses the reason gate', async () => {
+  const base = await setup();
+  const saved = { ...structuredClone(base.context.gOptions), blockURL2: 'blocked.html?$S&$U',
+    showTimer1: true, showTimer2: true, timerVisible: false, timerBadge: false };
+  const h = await setup({ initialize: false, local: memoryStorage(saved) });
+  await h.context.retrieveOptions();
+  assert.deepEqual(h.local.data, { ...saved, showTimer1: false, reasonGateCountdownMigration: 1 });
+});
+
+test('countdown display migration retries failed persistence without marking the migration complete', async () => {
+  const base = await setup();
+  const saved = { ...structuredClone(base.context.gOptions), showTimer1: true, showTimer2: true };
+  const storage = memoryStorage(saved), set = storage.set;
+  storage.set = async () => { throw new Error('test migration storage failure'); };
+  const h = await setup({ initialize: false, local: storage });
+  const warnings = [];
+  h.context.console = { log() {}, warn(message) { warnings.push(message); } };
+  await h.context.retrieveOptions();
+  assert.equal(h.context.gGotOptions, false);
+  assert.deepEqual(storage.data, saved);
+  assert.match(warnings[0], /test migration storage failure/);
+  storage.set = set;
+  await h.context.retrieveOptions();
+  assert.equal(h.context.gGotOptions, true);
+  assert.equal(storage.data.showTimer1, false);
+  assert.equal(storage.data.showTimer2, false);
+  assert.equal(storage.data.reasonGateCountdownMigration, 1);
+});
+
+test('countdown display is hidden by the per-set switch while both grant deadlines still block on expiry', async () => {
+  for (const [set, now, duration] of [[1, timestamp(9), 1800], [2, timestamp(23), 300]]) {
+    const h = await setup({ now, initialize: false });
+    await h.context.retrieveOptions();
+    assert.equal(h.local.data.showTimer1, false);
+    assert.equal(h.local.data.showTimer2, false);
+    assert.equal(h.context.gOptions.timerVisible, true, 'do not disable the global page timer');
+    assert.equal(h.context.gOptions.timerBadge, true, 'do not change the global badge preference');
+    await h.grant(set);
+    const result = h.check(home);
+    assert.equal(result.blocked, false);
+    assert.equal(result.state.secsLeft, duration);
+    const messages = [], titles = [];
+    h.context.chrome.tabs.sendMessage = async (id, message) => { messages.push(message); };
+    Object.assign(h.context.chrome.action, { setTitle(details) { titles.push(details.title); },
+      setBadgeText() {}, setBadgeBackgroundColor() {} });
+    h.context.updateTimer(result.id);
+    assert.equal(messages.at(-1).type, 'timer');
+    assert.equal(messages.at(-1).text, null);
+    assert.equal(titles.at(-1), 'LeechBlock [' + h.context.formatTime(duration) + ']');
+    const page = await contentPage();
+    page.context.gTimer = { hidden: false };
+    page.context.handleMessage(messages.at(-1), {}, () => {});
+    assert.equal(page.context.gTimer.hidden, true, 'the actual content script hides an existing timer box');
+    h.setClock(now + duration * 1000);
+    assert.equal(h.check(home).blocked, true);
+    assert.equal(h.check(fav).blocked, true);
+  }
+});
+
+// Exercise the real content-script lifecycle, including Chrome's synchronous
+// invalid-context exception and rejected message promises after a reload.
+async function contentPage({ missingRuntime = false } = {}) {
+  const listeners = new Map(), receivers = new Set(), messages = [], warnings = [];
+  const chrome = { runtime: {
+    id: missingRuntime ? undefined : 'test-extension',
+    async sendMessage(message) { messages.push(message); },
+    onMessage: { addListener(fn) { receivers.add(fn); }, removeListener(fn) { receivers.delete(fn); } },
+  } };
+  const context = vm.createContext({
+    chrome, console: { warn(message) { warnings.push(message); } },
+    document: { URL: home, referrer: search },
+    window: {
+      addEventListener(name, fn) { listeners.set(name, fn); },
+      removeEventListener(name, fn) { if (listeners.get(name) === fn) listeners.delete(name); },
+    },
+  });
+  vm.runInContext(fs.readFileSync(path.join(dir, 'content.js'), 'utf8'), context);
+  await new Promise(resolve => setImmediate(resolve));
+  return { context, chrome, listeners, receivers, messages, warnings };
+}
+
+test('content script still sends loaded, referrer, focus and blur notifications', async () => {
+  const page = await contentPage();
+  page.listeners.get('focus')(); page.listeners.get('blur')();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(page.messages.map(m => m.type), ['loaded', 'referrer', 'focus', 'focus']);
+  assert.equal(page.messages[2].focus, true);
+  assert.equal(page.messages[3].focus, false);
+  assert.equal(page.warnings.length, 0);
+});
+
+test('invalidated content scripts stop all listeners, remove stale UI and never send again', async () => {
+  for (const asynchronous of [false, true]) {
+    const page = await contentPage();
+    let sends = 0, removed = 0;
+    page.context.gTimer = { parentNode: { removeChild() { removed++; } } };
+    page.context.gAlert = { parentNode: { removeChild() { removed++; } } };
+    page.chrome.runtime.sendMessage = () => {
+      sends++;
+      const error = new Error('Extension context invalidated.');
+      if (asynchronous) return Promise.reject(error);
+      throw error;
+    };
+    assert.doesNotThrow(() => page.listeners.get('blur')());
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(page.context.gContentActive, false);
+    assert.equal(page.listeners.size, 0);
+    assert.equal(page.receivers.size, 0);
+    assert.equal(removed, 2);
+    page.context.onFocus(); page.context.onBlur(); page.context.notifyLoaded();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(sends, 1);
+    assert.equal(page.warnings.length, 0);
+  }
+});
+
+test('an absent runtime id stops even initial content notifications without throwing', async () => {
+  const page = await contentPage({ missingRuntime: true });
+  assert.equal(page.messages.length, 0);
+  assert.equal(page.listeners.size, 0);
+  assert.equal(page.receivers.size, 0);
+});
+
+test('temporary missing receivers do not disable content notifications; unexpected errors stay visible', async () => {
+  const page = await contentPage();
+  page.chrome.runtime.sendMessage = () => Promise.reject(new Error('Could not establish connection. Receiving end does not exist.'));
+  page.context.onFocus();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(page.context.gContentActive, true);
+  assert.equal(page.warnings.length, 0);
+  page.chrome.runtime.sendMessage = async message => page.messages.push(message);
+  page.context.onBlur();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(page.messages.at(-1).focus, false);
+  page.chrome.runtime.sendMessage = () => Promise.reject(new Error('Unexpected serialization failure'));
+  page.context.onFocus();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(page.warnings[0], /Unexpected serialization failure/);
+});
+
+test('ticker options wait for one shared offscreen creation before sending', async () => {
+  const h = await setup();
+  const messages = [];
+  let finishCreation, creations = 0;
+  h.context.chrome.offscreen.createDocument = () => {
+    creations++;
+    return new Promise(resolve => { finishCreation = resolve; });
+  };
+  h.context.chrome.runtime.sendMessage = async message => { messages.push(message); };
+  const startup = h.context.createTicker();
+  const refresh = h.context.refreshTicker();
+  assert.equal(startup, h.context.createTicker());
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(creations, 1);
+  assert.equal(messages.length, 0);
+  h.context.gOptions.processTabsSecs = '3';
+  finishCreation();
+  await Promise.all([startup, refresh]);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].type, 'ticker');
+  assert.equal(messages[0].tickerSecs, 3, 'use the current options after startup finishes');
+});
+
+test('a restarted worker reuses the offscreen ticker instead of creating a duplicate', async () => {
+  const h = await setup();
+  let query, creations = 0, sends = 0;
+  h.context.chrome.runtime.getContexts = async filter => { query = filter; return [{}]; };
+  h.context.chrome.offscreen.createDocument = async () => { creations++; };
+  h.context.chrome.runtime.sendMessage = async () => { sends++; };
+  await h.context.refreshTicker();
+  assert.equal(creations, 0);
+  assert.equal(sends, 1);
+  assert.equal(query.contextTypes[0], 'OFFSCREEN_DOCUMENT');
+  assert.equal(query.documentUrls[0], 'chrome-extension://test/ticker.html');
+});
+
+test('ticker creation and delivery failures are handled and later refreshes recover', async () => {
+  const h = await setup(), warnings = [];
+  h.context.console = { log() {}, warn(message) { warnings.push(message); } };
+  let failCreation = true, failSend = true, successfulSends = 0;
+  h.context.chrome.offscreen.createDocument = async () => {
+    if (failCreation) { failCreation = false; throw new Error('test create failure'); }
+  };
+  h.context.chrome.runtime.sendMessage = async () => {
+    if (failSend) { failSend = false; throw new Error('test send failure'); }
+    successfulSends++;
+  };
+  await h.context.refreshTicker();
+  await h.context.refreshTicker();
+  await h.context.refreshTicker();
+  assert.equal(successfulSends, 1);
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0], /test create failure/);
+  assert.match(warnings[1], /test send failure/);
+});
+
+test('ticker reuses an existing document on Chrome versions without runtime.getContexts', async () => {
+  const h = await setup();
+  delete h.context.chrome.runtime.getContexts;
+  h.context.self = { clients: { async matchAll() { return [{ url: 'chrome-extension://test/ticker.html' }]; } } };
+  let creations = 0;
+  h.context.chrome.offscreen.createDocument = async () => { creations++; };
+  await h.context.createTicker();
+  assert.equal(creations, 0);
+});
+
+test('initial gate messaging failures leave the gate disabled for both sync and async errors', async () => {
+  for (const syncSendError of [false, true]) {
+    const h = await setup();
+    const page = await inlinePage(h, { initialError: new Error('Extension context invalidated.'), syncSendError });
+    page.advance(10000);
+    assert.equal(page.submit.disabled, true);
+    assert.match(page.submit.title, /刷新/);
+    assert.equal(page.messages.length, 0);
+    assert.equal(h.check(home).blocked, true);
+  }
+});
+
+test('a synchronous invalid-context throw during submission retains the reason and cannot grant', async () => {
+  const h = await setup();
+  const page = await inlinePage(h, { failSend: 'invalidated', syncSendError: true });
+  page.reason.value = '查找学习相关视频';
+  page.advance(5000);
+  assert.doesNotThrow(() => page.submit.click());
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(page.submit.disabled, true);
+  assert.equal(page.reason.value, '查找学习相关视频');
+  assert.match(page.submit.title, /刷新/);
+  page.pressSubmit(); page.submit.dispatch('click');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(page.messages.length, 1);
+  assert.equal(h.check(home).blocked, true);
+});
+
+test('a synchronous transient gate failure can be retried without bypassing the gate', async () => {
+  const h = await setup(), page = await inlinePage(h, { failSend: true, syncSendError: true });
+  page.reason.value = '查找学习相关视频'; page.advance(5000); page.submit.click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(page.submit.disabled, false);
+  assert.equal(h.check(home).blocked, true);
+  page.submit.click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.check(home).blocked, false);
+});
+
+test('offscreen ticks survive a missing receiver and stop only when their context is invalidated', async () => {
+  let tick, clears = 0, sends = 0;
+  const warnings = [];
+  const chrome = { runtime: { onMessage: { addListener() {} }, sendMessage() {
+    sends++;
+    return Promise.reject(new Error('Could not establish connection. Receiving end does not exist.'));
+  } } };
+  const context = vm.createContext({
+    chrome, console: { warn(message) { warnings.push(message); } },
+    window: { setInterval(fn) { tick = fn; return 7; }, clearInterval(id) { assert.equal(id, 7); clears++; } },
+  });
+  vm.runInContext(fs.readFileSync(path.join(dir, 'ticker.js'), 'utf8'), context);
+  await tick();
+  assert.equal(clears, 0);
+  chrome.runtime.sendMessage = async () => { sends++; };
+  await tick();
+  assert.equal(sends, 2);
+  chrome.runtime.sendMessage = () => { throw new Error('Extension context invalidated.'); };
+  await tick();
+  assert.equal(clears, 1);
+  assert.equal(warnings.length, 0);
 });

@@ -30,6 +30,15 @@ function handleMessage(message, sender, sendResponse) {
 
 }
 
-function onInterval() {
-	browser.runtime.sendMessage({ type: "tick" });
+async function onInterval() {
+	try {
+		await browser.runtime.sendMessage({ type: "tick" });
+	} catch (error) {
+		const text = String(error?.message || error);
+		if (/Extension context invalidated/i.test(text)) {
+			window.clearInterval(gTickerID);
+		} else if (!/Receiving end does not exist|The message port closed before a response was received/i.test(text)) {
+			console.warn("[LBNG] Cannot send ticker update: " + text);
+		}
+	}
 }

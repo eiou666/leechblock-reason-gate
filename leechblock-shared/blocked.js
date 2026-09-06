@@ -8,6 +8,21 @@ var gBlockedURL;
 var gBlockedSet;
 var gHashCode;
 
+// An async boundary also converts Chrome's synchronous invalid-context throw
+// into a rejection, so every caller can keep the gate closed on failure.
+async function sendGateMessage(message) {
+	return browser.runtime.sendMessage(message);
+}
+
+function reportGateMessageError(error) {
+	const text = String(error?.message || error);
+	const submit = document.getElementById("submit");
+	if (submit) submit.title = "扩展连接已中断，请刷新此页面后重试";
+	if (!/Extension context invalidated|Receiving end does not exist|The message port closed before a response was received/i.test(text)) {
+		console.warn("[LBNG] Cannot communicate with reason gate: " + text);
+	}
+}
+
 // The local single-page gate never auto-submits and never displays a countdown.
 // Measure from navigation start, so extension startup latency adds no extra wait.
 function setupInlineReasonGate(info) {
@@ -44,11 +59,16 @@ function setupInlineReasonGate(info) {
 		submitted = true;
 		submit.disabled = true;
 		// Reuse the existing global grant handler; no reload or intermediate page.
-		browser.runtime.sendMessage({ type: "delayed", blockedURL: info.blockedURL,
-			blockedSet: info.blockedSet }).catch(() => {
-			// If the extension was reloaded/disconnected, retain the reason for retry.
+		sendGateMessage({ type: "delayed", blockedURL: info.blockedURL,
+			blockedSet: info.blockedSet }).catch(error => {
+			// A transient failure can be retried; an invalidated page needs a refresh.
 			submitted = false;
-			updateButton();
+			if (/Extension context invalidated/i.test(String(error?.message || error))) {
+				submitted = true;
+			} else {
+				updateButton();
+			}
+			reportGateMessageError(error);
 		});
 	};
 	reason.addEventListener("input", () => reason.setCustomValidity(""));
@@ -207,7 +227,7 @@ function onCountdownTimer(countdown) {
 			blockedURL: gBlockedURL,
 			blockedSet: gBlockedSet
 		};
-		browser.runtime.sendMessage(message);
+		sendGateMessage(message).catch(reportGateMessageError);
 	}
 }
 
@@ -222,7 +242,7 @@ function onSubmitPassword() {
 			blockedURL: gBlockedURL,
 			blockedSet: gBlockedSet
 		};
-		browser.runtime.sendMessage(message);
+		sendGateMessage(message).catch(reportGateMessageError);
 	} else {
 		// Clear input field and flash background
 		passwordInput.value = "";
@@ -240,4 +260,4 @@ function reloadBlockedPage() {
 }
 
 // Request block info from extension
-browser.runtime.sendMessage({ type: "blocked" }).then(processBlockInfo);
+sendGateMessage({ type: "blocked" }).then(processBlockInfo).catch(reportGateMessageError);

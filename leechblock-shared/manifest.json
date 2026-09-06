@@ -71,6 +71,6 @@
       "page": "options.html"
    },
    "permissions": [ "alarms", "contextMenus", "offscreen", "storage", "tabs", "unlimitedStorage", "webNavigation" ],
-   "version": "1.7.3.2",
-   "version_name": "1.7.3 + shared reason gate 2 (inline wait)"
+   "version": "1.7.3.5",
+   "version_name": "1.7.3 + shared reason gate 5 (per-set timer migration)"
 }

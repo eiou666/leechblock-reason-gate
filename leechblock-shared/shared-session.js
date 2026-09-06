@@ -118,6 +118,19 @@ function parseReasonGate(url, options) {
 	} catch { return null; }
 }
 
+// Updating default values alone cannot change an existing browser's settings.
+// Apply this requested display change once, only to the two local gate sets.
+function reasonGateCountdownMigration(options) {
+	if (options.reasonGateCountdownMigration === 1) return {};
+	const patch = { reasonGateCountdownMigration: 1 };
+	for (const set of [1, 2]) {
+		if (+options.numSets >= set && reasonSharedPolicy(set, options)) {
+			patch[`showTimer${set}`] = false;
+		}
+	}
+	return patch;
+}
+
 function reasonGateDefaults() {
 	const sites = ["douyin.com", "bilibili.com", "b23.tv", "youtube.com", "youtu.be",
 		"x.com", "twitter.com", "t.co", "zhihu.com"].flatMap(site => [site, `*.${site}`]).join(" ");
@@ -129,6 +142,7 @@ function reasonGateDefaults() {
 			[`times${set}`]: set == 1 ? "0700-1150,1200-1750,1800-2200" : "0000-0700,1150-1200,1750-1800,2200-2400",
 			[`days${set}`]: Array(7).fill(true),
 			[`disable${set}`]: false,
+			[`showTimer${set}`]: false,
 			[`conjMode${set}`]: false,
 			[`limitMins${set}`]: "",
 			[`limitPeriod${set}`]: "",
