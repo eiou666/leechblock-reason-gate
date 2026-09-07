@@ -74,7 +74,9 @@ function setupInlineReasonGate(info) {
 	reason.addEventListener("input", () => reason.setCustomValidity(""));
 	submit.addEventListener("click", begin);
 	reason.addEventListener("keydown", event => {
-		if (event.ctrlKey && event.key == "Enter") {
+		// Enter submits; Shift+Enter keeps multiline input. IME confirmation is not submission.
+		if (event.key == "Enter" && !event.shiftKey && !event.isComposing
+				&& event.keyCode !== 229 && !event.repeat) {
 			event.preventDefault();
 			begin();
 		}

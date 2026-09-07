@@ -781,3 +781,33 @@ test('offscreen ticks survive a missing receiver and stop only when their contex
   assert.equal(clears, 1);
   assert.equal(warnings.length, 0);
 });
+
+
+test('plain Enter obeys the wait and reason rules and grants exactly once', async () => {
+  const h = await setup(), page = await inlinePage(h);
+  let prevented = 0;
+  const enter = () => page.reason.dispatch('keydown', { key: 'Enter', preventDefault() { prevented++; } });
+  page.reason.value = '查找学习相关视频';
+  page.advance(4999); enter();
+  assert.equal(page.messages.length, 0);
+  page.advance(1);
+  page.reason.value = '不足'; enter();
+  assert.equal(page.messages.length, 0);
+  assert.equal(page.reason.validity, '至少输入5个非空白字符');
+  page.reason.value = '查找学习相关视频'; enter(); enter();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(prevented, 4);
+  assert.equal(page.messages.length, 1);
+  assert.equal(h.check(home).blocked, false);
+});
+
+test('IME confirmation, Shift+Enter and held Enter do not submit', async () => {
+  const h = await setup(), page = await inlinePage(h);
+  page.advance(5000); page.reason.value = '查找学习相关视频';
+  for (const flags of [{ isComposing: true }, { keyCode: 229 }, { shiftKey: true }, { repeat: true }]) {
+    page.reason.dispatch('keydown', { key: 'Enter', ...flags,
+      preventDefault() { assert.fail('Do not intercept composition or newline'); } });
+  }
+  assert.equal(page.messages.length, 0);
+  assert.equal(h.check(home).blocked, true);
+});
