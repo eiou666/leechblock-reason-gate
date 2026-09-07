@@ -74,7 +74,7 @@ async function setup({ now = timestamp(), session = memoryStorage(), local = mem
 }
 
 // DOM/event/timer harness for the served single-page UI plus real content script.
-async function inlinePage(h, { elapsed = 0, infoOverride, failSend = false, initialError, syncSendError = false } = {}) {
+async function inlinePage(h, { elapsed = 0, infoOverride, failSend = false, initialError, syncSendError = false, internal = false } = {}) {
   class Element {
     constructor(attributes = {}) { this.attributes = attributes; this.events = {}; this.value = ''; this.disabled = false; this.validity = ''; this.reports = 0; }
     getAttribute(key) { return this.attributes[key] ?? null; }
@@ -90,7 +90,7 @@ async function inlinePage(h, { elapsed = 0, infoOverride, failSend = false, init
   const reason = new Element(), submit = new Element(); submit.disabled = true;
   let clock = elapsed, rejectNextSend = failSend;
   const timers = [], messages = [];
-  const source = `${gateBase}?1&${search}`;
+  const source = `${internal ? 'chrome-extension://test/reason-gate.html' : gateBase}?1&${search}`;
   const id = h.tab(source);
   const elements = { app, reason, submit };
   const context = vm.createContext({
@@ -98,7 +98,7 @@ async function inlinePage(h, { elapsed = 0, infoOverride, failSend = false, init
     location: new URL(source),
     performance: { now: () => clock },
     window: { setTimeout(fn, ms) { timers.push({ fn, at: clock + ms }); return timers.length; } },
-    chrome: { runtime: { sendMessage(message) {
+    chrome: { runtime: { getURL: name => `chrome-extension://test/${name}`, sendMessage(message) {
       if (message.type === 'blocked') {
         if (initialError) {
           if (syncSendError) throw initialError;
@@ -251,7 +251,7 @@ test('before granting, the actual blocker gates search, homepage and favorites',
   for (const url of [search, home, fav]) {
     const { id, blocked } = h.check(url);
     assert.equal(blocked, true);
-    assert.equal(h.updates.find(u => u.id === id).url, `${gateBase}?1&${url}`);
+    assert.equal(h.updates.find(u => u.id === id).url, `chrome-extension://test/reason-gate.html?1&${url}`);
   }
 });
 
@@ -387,7 +387,10 @@ test('already-open gate pages resume automatically without renewing or releasing
   const privateId = h.tab(`${gateBase}?1&${home}`, true);
   await h.grant();
   assert.equal(h.updates.find(u => u.id === same).url, fav);
-  assert.equal(h.updates.some(u => u.id === other || u.id === privateId), false);
+  for (const id of [other, privateId]) {
+    assert.ok(h.updates.filter(u => u.id === id).every(u => u.url.startsWith('chrome-extension://test/reason-gate.html?')),
+      'ungranted tabs may move to the built-in gate but must not reach the target');
+  }
   h.setClock(timestamp(9, 5));
   const later = { id: 80, url: `${gateBase}?1&${home}`, incognito: false };
   await h.context.resumeSharedGate(later);
@@ -482,7 +485,7 @@ test('local fork manifest has its own identity, no store update, and unchanged p
   const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));
   assert.equal(manifest.key, undefined);
   assert.equal(manifest.update_url, undefined);
-  assert.equal(manifest.version, '1.7.3.5');
+  assert.equal(manifest.version, '1.7.3.6');
   for (const script of ['background.js', 'common.js', 'shared-session.js', 'blocked.js', 'content.js', 'ticker.js']) {
     assert.doesNotThrow(() => new vm.Script(fs.readFileSync(path.join(dir, script), 'utf8'), { filename: script }));
   }
@@ -810,4 +813,46 @@ test('IME confirmation, Shift+Enter and held Enter do not submit', async () => {
   }
   assert.equal(page.messages.length, 0);
   assert.equal(h.check(home).blocked, true);
+});
+
+
+test('built-in gate submits with Enter after 5 seconds without any HTTP service', async () => {
+  const h = await setup(), page = await inlinePage(h, { internal: true });
+  page.reason.value = '查找学习相关视频';
+  const enter = () => page.reason.dispatch('keydown', { key: 'Enter', preventDefault() {} });
+  page.advance(4999); enter(); assert.equal(page.messages.length, 0);
+  page.advance(1); enter();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(page.messages.length, 1);
+  assert.equal(h.check(home).blocked, false);
+  h.setClock(timestamp(9, 30));
+  const result = h.check(home);
+  assert.equal(result.blocked, true);
+  assert.equal(h.updates.find(u => u.id === result.id).url, `chrome-extension://test/reason-gate.html?1&${home}`);
+});
+
+test('legacy error tabs move to built-in gate without issuing a grant', async () => {
+  const h = await setup();
+  const id = h.tab(`${gateBase}?1&${search}`);
+  await h.context.resumeSharedGateTabs();
+  assert.equal(h.updates.find(u => u.id === id).url, `chrome-extension://test/reason-gate.html?1&${search}`);
+  assert.equal(h.check(search).blocked, true);
+});
+
+test('internal source validation rejects other extensions and preserves query fragments', async () => {
+  const h = await setup(), url = home + '&query=x#anchor';
+  const source = `chrome-extension://test/reason-gate.html?1&${url}`;
+  const id = h.tab(source);
+  await h.context.allowBlockedPage(id, url, 1, true, source.replace('://test/', '://evil/'));
+  assert.equal(h.check(home).blocked, true);
+  await h.context.allowBlockedPage(id, url, 1, true, source);
+  assert.equal(h.check(home).blocked, false);
+  assert.equal(h.updates.find(u => u.id === id).url, url);
+});
+
+test('built-in gate bundles its script and contains no HTTP dependency', () => {
+  const html = fs.readFileSync(path.join(dir, 'reason-gate.html'), 'utf8');
+  assert.match(html, /data-lb-reason-gate="inline-v1"/);
+  assert.match(html, /<script src="blocked.js"><\/script>/);
+  assert.doesNotMatch(html, /(?:src|href)="https?:/);
 });

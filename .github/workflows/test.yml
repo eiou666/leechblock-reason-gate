@@ -27,13 +27,13 @@ jobs:
           node scripts/package.cjs
       - name: Test global grants and inline gate
         run: node --test --test-isolation=none scripts/test-shared-session.cjs
-      - name: Start loopback service
+      - name: Start legacy compatibility service
         shell: pwsh
         run: ./scripts/start.ps1
-      - name: Check served gate
+      - name: Check legacy served gate
         shell: pwsh
         run: ./scripts/test.ps1
-      - name: Stop loopback service
+      - name: Stop legacy compatibility service
         if: always()
         shell: pwsh
         run: ./scripts/stop.ps1

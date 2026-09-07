@@ -104,14 +104,15 @@ class ReasonGateSessions {
 	}
 }
 
-function parseReasonGate(url, options) {
+function parseReasonGate(url, options, internalGate = "") {
 	try {
 		const gate = new URL(url);
 		const match = gate.search.slice(1).match(/^([1-9]\d*)&(https?:\/\/.+)$/);
 		if (!match) return null;
 		const set = +match[1];
 		const policy = reasonSharedPolicy(set, options);
-		if (!policy || gate.origin + gate.pathname != policy.gate) return null;
+		if (!policy || (gate.origin + gate.pathname != policy.gate
+				&& gate.href.split(/[?#]/)[0] !== internalGate)) return null;
 		const target = match[2] + gate.hash;
 		if (!["http:", "https:"].includes(new URL(target).protocol)) return null;
 		return { set, target, policy };

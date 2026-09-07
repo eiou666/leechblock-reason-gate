@@ -28,8 +28,10 @@ function reportGateMessageError(error) {
 function setupInlineReasonGate(info) {
 	const app = document.getElementById("app");
 	if (!app || app.getAttribute("data-lb-reason-gate") != "inline-v1") return false;
-	if (location.origin != "http://127.0.0.1:8765"
-			|| location.pathname != "/lb-custom/reason-gate.html") return false;
+	const internalGate = browser.runtime.getURL?.("reason-gate.html");
+	const isInternal = internalGate && location.href.split(/[?#]/)[0] === internalGate;
+	if (!isInternal && (location.origin != "http://127.0.0.1:8765"
+			|| location.pathname != "/lb-custom/reason-gate.html")) return false;
 	const reason = document.getElementById("reason");
 	const submit = document.getElementById("submit");
 	if (!reason || !submit) return true;

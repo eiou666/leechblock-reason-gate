@@ -607,6 +607,9 @@ function checkTab(id, isBeforeNav, isRepeat) {
 			let conjMode = gOptions[`conjMode${set}`];
 			let days = gOptions[`days${set}`];
 			let blockURL = gOptions[`blockURL${set}`];
+			if (reasonSharedPolicy(set, gOptions)) {
+				blockURL = browser.runtime.getURL("reason-gate.html") + "?$S&$U";
+			}
 			let applyFilter = gOptions[`applyFilter${set}`];
 			let filterName = gOptions[`filterName${set}`];
 			let filterMute = gOptions[`filterMute${set}`];
@@ -1546,7 +1549,7 @@ async function allowBlockedPage(id, url, set, autoLoad, sourceURL) {
 
 	const policy = reasonSharedPolicy(set, gOptions);
 	if (policy) {
-		const gate = parseReasonGate(sourceURL, gOptions);
+		const gate = parseReasonGate(sourceURL, gOptions, browser.runtime.getURL("reason-gate.html"));
 		if (!gate || gate.set != set || gate.target != url || !gTabs[id]) return;
 		const now = Math.floor(Date.now() / 1000) + gClockOffset * 60;
 		const timedata = gOptions[`timedata${set}`];
@@ -1589,18 +1592,20 @@ async function allowBlockedPage(id, url, set, autoLoad, sourceURL) {
 async function resumeSharedGate(tab) {
 	if (!gGotOptions || !tab?.url) return;
 	await gReasonSessions.ready;
-	const gate = parseReasonGate(tab.url, gOptions);
+	const gate = parseReasonGate(tab.url, gOptions, browser.runtime.getURL("reason-gate.html"));
 	if (!gate) return;
 	const now = Math.floor(Date.now() / 1000) + gClockOffset * 60;
 	const timedata = gOptions[`timedata${gate.set}`];
 	if (timedata[4] > now || timedata[8] > now) return;
 	if (gReasonSessions.get(gate.set, !!tab.incognito, gate.policy, now)) {
 		await browser.tabs.update(tab.id, { url: gate.target });
+	} else if (tab.url.startsWith("http://127.0.0.1:8765/")) {
+		await browser.tabs.update(tab.id, { url: browser.runtime.getURL("reason-gate.html") + "?" + gate.set + "&" + gate.target });
 	}
 }
 
 async function resumeSharedGateTabs() {
-	const tabs = await browser.tabs.query({ url: "http://127.0.0.1:8765/lb-custom/reason-gate.html*" });
+	const tabs = await browser.tabs.query({ url: ["http://127.0.0.1:8765/lb-custom/reason-gate.html*", browser.runtime.getURL("reason-gate.html") + "*"] });
 	await Promise.all(tabs.map(tab => resumeSharedGate(tab).catch(error => warn(error))));
 }
 
@@ -2095,7 +2100,7 @@ function createTicker() {
 
 /*** STARTUP CODE BEGINS HERE ***/
 
-retrieveOptions();
+retrieveOptions().then(() => resumeSharedGateTabs()).catch(error => warn(error));
 
 checkManagedStorage();
 
