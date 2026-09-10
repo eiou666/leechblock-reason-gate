@@ -64,7 +64,7 @@
    },
    "incognito": "split",
    "manifest_version": 3,
-   "name": "LeechBlock NG — 全局理由门（本地版）",
+   "name": "访问网络",
    "optional_permissions": [ "history" ],
    "options_ui": {
       "open_in_tab": true,
