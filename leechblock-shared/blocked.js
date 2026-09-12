@@ -243,6 +243,7 @@ function onSubmitPassword() {
 		// Notify extension that password was successfully entered
 		let message = {
 			type: "password",
+			password: passwordInput.value,
 			blockedURL: gBlockedURL,
 			blockedSet: gBlockedSet
 		};

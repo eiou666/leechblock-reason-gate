@@ -2,7 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-importScripts("common.js", "shared-session.js");
+importScripts("common.js", "shared-session.js", "night-gate.js");
+var gNightGatePassword = "";
+try { importScripts("night-password.local.js"); } catch (_) { /* Optional local-only configuration. */ }
 
 const browser = chrome;
 
@@ -218,7 +220,7 @@ function retrieveOptions(update) {
 		if (freshInstall) {
 			options = { ...options, ...reasonGateDefaults() };
 		}
-		const migration = reasonGateCountdownMigration(options);
+		const migration = { ...reasonGateCountdownMigration(options), ...nightPasswordMigration(options, gNightGatePassword) };
 		if (freshInstall || Object.keys(migration).length) {
 			// Persist the switches and marker together before publishing options.
 			await gStorage.set(freshInstall ? { ...options, ...migration } : migration);
@@ -608,7 +610,7 @@ function checkTab(id, isBeforeNav, isRepeat) {
 			let days = gOptions[`days${set}`];
 			let blockURL = gOptions[`blockURL${set}`];
 			if (reasonSharedPolicy(set, gOptions)) {
-				blockURL = browser.runtime.getURL("reason-gate.html") + "?$S&$U";
+				blockURL = browser.runtime.getURL(reasonSharedPolicy(set, gOptions).passwordGate ? "password.html" : "reason-gate.html") + "?$S&$U";
 			}
 			let applyFilter = gOptions[`applyFilter${set}`];
 			let filterName = gOptions[`filterName${set}`];
@@ -1540,7 +1542,7 @@ function openExtensionPage(url) {
 
 // Allow page blocked by delaying/password page
 //
-async function allowBlockedPage(id, url, set, autoLoad, sourceURL) {
+async function allowBlockedPage(id, url, set, autoLoad, sourceURL, submittedPassword) {
 	//log("allowBlockedPage: " + id + " " + url + " " + set);
 
 	if (!gGotOptions || set < 1 || set > gNumSets) {
@@ -1551,6 +1553,7 @@ async function allowBlockedPage(id, url, set, autoLoad, sourceURL) {
 	if (policy) {
 		const gate = parseReasonGate(sourceURL, gOptions, browser.runtime.getURL("reason-gate.html"));
 		if (!gate || gate.set != set || gate.target != url || !gTabs[id]) return;
+		if (policy.passwordGate && (!gOptions[`passwordSetSpec${set}`] || submittedPassword !== gOptions[`passwordSetSpec${set}`])) return;
 		const now = Math.floor(Date.now() / 1000) + gClockOffset * 60;
 		const timedata = gOptions[`timedata${set}`];
 		if (timedata[4] > now || timedata[8] > now) return;
@@ -1605,7 +1608,7 @@ async function resumeSharedGate(tab) {
 }
 
 async function resumeSharedGateTabs() {
-	const tabs = await browser.tabs.query({ url: ["http://127.0.0.1:8765/lb-custom/reason-gate.html*", browser.runtime.getURL("reason-gate.html") + "*"] });
+	const tabs = await browser.tabs.query({ url: ["http://127.0.0.1:8765/lb-custom/reason-gate.html*", browser.runtime.getURL("reason-gate.html") + "*", browser.runtime.getURL("password.html") + "*"] });
 	await Promise.all(tabs.map(tab => resumeSharedGate(tab).catch(error => warn(error))));
 }
 
@@ -1908,7 +1911,7 @@ function handleMessage(message, sender, sendResponse) {
 			allowBlockedPage(sender.tab.id,
 					message.blockedURL,
 					message.blockedSet,
-					true, sender.url).catch(error => warn(error));
+					true, sender.url, message.password).catch(error => warn(error));
 			break;
 
 		case "referrer":

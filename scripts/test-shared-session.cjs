@@ -12,6 +12,130 @@ const fav = 'https://space.bilibili.com/123456789/favlist?fid=987654321&ftype=cr
 const search = 'https://search.bilibili.com/all';
 const timestamp = (hour = 9, minute = 0, second = 0) => new Date(2026, 8, 5, hour, minute, second).getTime();
 
+test('night migration preserves daytime settings, copies sites, and runs only once', async () => {
+  const h = await setup();
+  const original = structuredClone(h.context.gOptions);
+  const patch = h.context.nightPasswordMigration(h.context.gOptions, 'test-only-password');
+  Object.assign(h.context.gOptions, patch);
+  assert.equal(patch.numSets, '3');
+  assert.equal(patch.times2, '0600-0700,1150-1200,1750-1800,2200-2300');
+  assert.equal(patch.times3, '0000-0600,2300-2400');
+  assert.equal(patch.sites3, original.sites2);
+  for (const key of Object.keys(original)) {
+    if (key !== 'times2' && key !== 'numSets') assert.deepEqual(structuredClone(h.context.gOptions[key]), original[key], key);
+  }
+  assert.equal(Object.keys(h.context.nightPasswordMigration(h.context.gOptions, 'test-only-password')).length, 0);
+});
+
+async function setupNight(now) {
+  const h = await setup({ now });
+  Object.assign(h.context.gOptions, h.context.nightPasswordMigration(h.context.gOptions, 'test-only-password'));
+  h.run('gNumSets = +gOptions.numSets; cleanOptions(gOptions); cleanTimeData(gOptions); createRegExps();');
+  return h;
+}
+
+test('night configuration covers every minute exactly once and only 23:00-06:00 requires a password', async () => {
+  const h = await setupNight(timestamp(23));
+  for (let minute = 0; minute < 1440; minute++) {
+    const now = timestamp(0, minute) / 1000;
+    const active = [1, 2, 3].filter(set => h.context.reasonScheduleWindow(h.policy(set), now));
+    assert.equal(active.length, 1);
+    assert.equal(active[0] === 3, minute < 360 || minute >= 1380);
+  }
+});
+
+test('night grant requires the exact password, rejects reason-page bypass and remains globally shared for five minutes', async () => {
+  const h = await setupNight(timestamp(23, 10));
+  const blocked = h.check(home);
+  const source = `chrome-extension://test/password.html?3&${home}`;
+  assert.equal(h.updates.find(u => u.id === blocked.id).url, source);
+  const id = h.tab(source);
+  await h.context.allowBlockedPage(id, home, 3, true, source, 'wrong');
+  assert.equal(h.check(fav).blocked, true);
+  await h.context.allowBlockedPage(id, home, 3, true, `chrome-extension://test/reason-gate.html?3&${home}`, 'test-only-password');
+  assert.equal(h.check(fav).blocked, true);
+  await h.context.allowBlockedPage(id, home, 3, true, source);
+  assert.equal(h.check(fav).blocked, true);
+  await h.context.allowBlockedPage(id, home, 3, true, source, 'test-only-password');
+  assert.equal(h.check(fav).blocked, false);
+  assert.equal(h.check('https://www.youtube.com/').state.secsLeft, 300);
+  h.setClock(timestamp(23, 15));
+  assert.equal(h.check(fav).blocked, true);
+});
+
+test('23:00 and 06:00 boundaries require the new gate instead of carrying an old grant', async () => {
+  const h = await setupNight(timestamp(22, 59));
+  await h.grant(2, home);
+  assert.equal(h.check(fav).state.secsLeft, 60);
+  h.setClock(timestamp(23));
+  assert.equal(h.check(fav).blocked, true);
+  h.setClock(timestamp(29, 59)); // next day 05:59
+  const source = `chrome-extension://test/password.html?3&${home}`;
+  await h.context.allowBlockedPage(h.tab(source), home, 3, true, source, 'test-only-password');
+  assert.equal(h.check(fav).state.secsLeft, 60);
+  h.setClock(timestamp(30));
+  const result = h.check(fav);
+  assert.equal(result.blocked, true);
+  assert.match(h.updates.find(u => u.id === result.id).url, /reason-gate\.html\?2&/);
+});
+
+test('password grant crosses midnight and survives worker re-creation without extension', async () => {
+  const h = await setupNight(timestamp(23, 59));
+  const source = `chrome-extension://test/password.html?3&${home}`;
+  await h.context.allowBlockedPage(h.tab(source), home, 3, true, source, 'test-only-password');
+  h.setClock(timestamp(24, 1));
+  assert.equal(h.check(fav).state.secsLeft, 180);
+  const resumed = await setup({ now: timestamp(24, 1), initialize: false, session: h.session,
+    local: memoryStorage(h.context.gOptions) });
+  await resumed.context.retrieveOptions();
+  assert.equal(resumed.check(fav).blocked, false);
+  assert.equal(resumed.check(fav).state.secsLeft, 180);
+});
+
+test('night migration appends a set without overwriting an unrelated existing group', async () => {
+  const h = await setup();
+  h.context.gOptions.numSets = '3';
+  h.context.gOptions.sites3 = 'example.com';
+  const patch = h.context.nightPasswordMigration(h.context.gOptions, 'test-only-password');
+  assert.equal(patch.numSets, '4');
+  assert.equal(patch.nightPasswordSet, 4);
+  assert.equal(patch.sites3, undefined);
+});
+
+test('native password-page submission sends the password to the real background validator', async () => {
+  const h = await setupNight(timestamp(23, 20));
+  const source = `chrome-extension://test/password.html?3&${home}`;
+  const id = h.tab(source);
+  const input = { value: 'test-only-password' };
+  const page = vm.createContext({
+    document: { getElementById: name => name === 'lbPasswordInput' ? input : null },
+    console,
+    chrome: { runtime: { async sendMessage(message) {
+      if (message.type === 'blocked') return null;
+      h.context.handleMessage(message, { tab: { id, incognito: false }, url: source }, () => {});
+    } } }
+  });
+  vm.runInContext(fs.readFileSync(path.join(dir, 'blocked.js'), 'utf8'), page);
+  vm.runInContext(`gBlockedSet = '3'; gBlockedURL = ${JSON.stringify(home)}; gHashCode = hashCode32('test-only-password'); onSubmitPassword();`, page);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.check(fav).blocked, false);
+  assert.equal(h.check(fav).state.secsLeft, 300);
+});
+
+test('reloading applies the local night defaults to existing settings and fresh installations', async () => {
+  for (const existing of [false, true]) {
+    const original = await setup();
+    const h = await setup({ initialize: false, local: memoryStorage(existing ? original.context.gOptions : {}) });
+    h.context.gNightGatePassword = 'test-only-password';
+    await h.context.retrieveOptions();
+    assert.equal(h.context.gNumSets, 3);
+    assert.equal(h.local.data.passwordSetSpec3, 'test-only-password');
+    assert.equal(h.local.data.delayAllowMins1, '30');
+    assert.equal(h.local.data.delayAllowMins2, '5');
+    assert.equal(h.local.data.delayAllowMins3, '5');
+  }
+});
+
 function memoryStorage(seed = {}) {
   const data = structuredClone(seed);
   return {
@@ -44,7 +168,10 @@ async function setup({ now = timestamp(), session = memoryStorage(), local = mem
     i18n: { getMessage: () => '' },
   };
   const context = vm.createContext({ chrome, URL, Date: Clock, console, setTimeout, clearTimeout });
-  context.importScripts = (...names) => names.forEach(name => vm.runInContext(fs.readFileSync(path.join(dir, name), 'utf8'), context, { filename: name }));
+  context.importScripts = (...names) => names.forEach(name => {
+    if (name === 'night-password.local.js') return; // Never read the user's secret in tests.
+    vm.runInContext(fs.readFileSync(path.join(dir, name), 'utf8'), context, { filename: name });
+  });
   vm.runInContext(background, context, { filename: 'background.js' });
   const run = code => vm.runInContext(code, context);
   const sessions = run('gReasonSessions');

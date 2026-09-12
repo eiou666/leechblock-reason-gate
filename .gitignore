@@ -8,6 +8,7 @@ Thumbs.db
 node_modules/
 .env
 .env.*
+leechblock-shared/night-password.local.js
 # Local superseded experiments are not part of the current product.
 TAB-INHERITANCE.md
 scripts/leechblock-inherit-tabs.user.js

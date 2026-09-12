@@ -5,13 +5,14 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const assert = require('node:assert/strict');
 const root = path.join(__dirname, '..');
-const roots = ['.gitignore', 'LICENSE', 'README.md', 'GLOBAL-GATE.md', 'THIRD-PARTY-NOTICES.md',
+const roots = ['.gitignore', 'LICENSE', 'README.md', 'GLOBAL-GATE.md', 'NIGHT-PASSWORD.md', 'THIRD-PARTY-NOTICES.md',
   '.github/workflows/test.yml', 'config', 'lb-custom', 'leechblock-shared',
   'scripts/server.py', 'scripts/install.ps1', 'scripts/start.ps1', 'scripts/stop.ps1',
   'scripts/uninstall.ps1', 'scripts/test.ps1', 'scripts/test-shared-session.cjs',
   'scripts/defaults.cjs', 'scripts/package.cjs'];
 
 function listFiles(relative) {
+  if (relative.endsWith('/night-password.local.js')) return [];
   const absolute = path.join(root, relative);
   const stat = fs.lstatSync(absolute);
   assert.equal(stat.isSymbolicLink(), false, `No symlinks allowed: ${relative}`);
@@ -21,6 +22,7 @@ function listFiles(relative) {
 function inventory() {
   return roots.flatMap(listFiles).sort().map(file => {
     assert.doesNotMatch(file, /(^|\/)(\.runtime|\.env|node_modules|__pycache__|_metadata)(\/|$)/);
+    assert.notEqual(path.basename(file), 'night-password.local.js', 'Private password file must never be released');
     const data = fs.readFileSync(path.join(root, file));
     const sha = crypto.createHash('sha1').update(`blob ${data.length}\0`).update(data).digest('hex');
     return { path: file, size: data.length, sha, mode: '100644', type: 'blob' };

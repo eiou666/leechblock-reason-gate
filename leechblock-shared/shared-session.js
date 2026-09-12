@@ -5,15 +5,17 @@
 // A grant belongs to a block set, never to a tab, opener, host or URL.
 // session storage survives MV3 worker suspension, but not browser restart.
 function reasonSharedPolicy(set, options) {
+	const passwordGate = +options.nightPasswordSet === +set && options[`blockURL${set}`] === PASSWORD_BLOCK_URL;
 	let gate;
-	try { gate = new URL(options[`blockURL${set}`]); } catch { return null; }
+	try { gate = new URL(passwordGate ? 'http://127.0.0.1:8765/lb-custom/reason-gate.html' : options[`blockURL${set}`]); } catch { return null; }
 	if (gate.protocol != "http:" || gate.hostname != "127.0.0.1"
 			|| gate.port != "8765" || gate.pathname != "/lb-custom/reason-gate.html") return null;
 	const minutes = +options[`delayAllowMins${set}`];
 	if (!Number.isFinite(minutes) || minutes <= 0 || !options[`times${set}`]) return null;
 	const values = Object.keys(PER_SET_OPTIONS).map(key => options[`${key}${set}`]);
 	return {
-		gate: gate.origin + gate.pathname,
+		gate: passwordGate ? 'password.html' : gate.origin + gate.pathname,
+		passwordGate,
 		minutes,
 		times: options[`times${set}`],
 		days: options[`days${set}`],
@@ -111,6 +113,7 @@ function parseReasonGate(url, options, internalGate = "") {
 		if (!match) return null;
 		const set = +match[1];
 		const policy = reasonSharedPolicy(set, options);
+		if (policy?.passwordGate && internalGate) internalGate = new URL('password.html', internalGate).href;
 		if (!policy || (gate.origin + gate.pathname != policy.gate
 				&& gate.href.split(/[?#]/)[0] !== internalGate)) return null;
 		const target = match[2] + gate.hash;
